@@ -1,0 +1,140 @@
+% SCRIPT PARA APLICAR K-MEANS EN HSV A TODAS LAS IMÁGENES
+% =========================================================
+
+% Limpiar entorno
+clear; clc; close all;
+
+% Configuración de carpetas
+carpeta_origen = 'D:\Posgrado Segundo MR-2\PDI\Nueva carpeta (2)\ForesFireDataset(ObjectDetection)\valid\images\Alto';    % Carpeta donde están tus fotos
+carpeta_destino = 'resultados_segmentacion_HSVsinincendio'; % Carpeta donde se guardarán los resultados
+
+% Crear carpeta de destino si no existe
+if ~exist(carpeta_destino, 'dir')
+    mkdir(carpeta_destino);
+end
+
+% Opciones de ejecución
+fprintf('=== SEGMENTACIÓN CON K-MEANS (ESPACIO HSV) ===\n');
+fprintf('Algoritmo: K-Means en espacio de color HSV\n');
+fprintf('H = Hue (Matiz), S = Saturation, V = Value\n');
+fprintf('Distancia: Euclidiana con HUE circular\n');
+fprintf('Número de clusters: K=5\n\n');
+
+% Obtener lista de imágenes
+archivos = dir(fullfile(carpeta_origen, '*.jpg'));
+archivos = [archivos; dir(fullfile(carpeta_origen, '*.png'))];
+archivos = [archivos; dir(fullfile(carpeta_origen, '*.jpeg'))];
+
+% Verificar si hay imágenes
+if isempty(archivos)
+    error('❌ No se encontraron imágenes en la carpeta "%s"', carpeta_origen);
+end
+
+fprintf('🔍 Encontradas %d imágenes para procesar\n\n', length(archivos));
+
+% Procesar cada imagen
+for i = 1:length(archivos)
+    
+    % Obtener nombre del archivo
+    nombre_imagen = archivos(i).name;
+    fprintf('📷 [%d/%d] Procesando: %s\n', i, length(archivos), nombre_imagen);
+    
+    % Cargar imagen
+    ruta_imagen = fullfile(carpeta_origen, nombre_imagen);
+    imagen = imread(ruta_imagen);
+    
+    % Aplicar K-Means HSV con K=5
+    imagen_segmentada = aplicarKMeansHSV(imagen, 5);
+    
+    % Guardar resultado
+    ruta_segmentada = fullfile(carpeta_destino, nombre_imagen);
+    imwrite(imagen_segmentada, ruta_segmentada);
+    
+    fprintf('   ✅ Guardada en: %s\n\n', carpeta_destino);
+end
+
+fprintf('========================================\n');
+fprintf('✨ ¡PROCESO COMPLETADO! ✨\n');
+fprintf('========================================\n');
+fprintf('📊 Total de imágenes procesadas: %d\n', length(archivos));
+fprintf('📁 Resultados guardados en: %s\n', carpeta_destino);
+fprintf('========================================\n');
+
+% ============================================
+% FUNCIÓN aplicarKMeansHSV (CORREGIDA Y FUNCIONAL)
+% ============================================
+function imagen_segmentada = aplicarKMeansHSV(imagen_rgb, k)
+    % aplicarKMeansHSV: Segmenta imagen usando K-Means en espacio HSV
+    
+    % Convertir RGB a HSV
+    imagen_hsv = rgb2hsv(imagen_rgb);
+    
+    % Obtener dimensiones
+    [filas, columnas, ~] = size(imagen_hsv);
+    
+    % Reorganizar píxeles [H, S, V]
+    pixeles = reshape(imagen_hsv, filas * columnas, 3);
+    
+    % Inicializar centroides aleatorios
+    num_pixeles = size(pixeles, 1);
+    idx_aleatorios = randperm(num_pixeles, k);
+    centroides = pixeles(idx_aleatorios, :);
+    
+    % Parámetros K-Means
+    max_iteraciones = 100;
+    tolerancia = 1e-4;
+    etiquetas_anteriores = zeros(num_pixeles, 1);
+    
+    % Algoritmo K-Means
+    for iter = 1:max_iteraciones
+        % Calcular distancias (con HUE circular)
+        distancias = zeros(num_pixeles, k);
+        
+        for c = 1:k
+            % Diferencia para HUE (circular, 0-1)
+            diff_h = abs(pixeles(:,1) - centroides(c,1));
+            diff_h = min(diff_h, 1 - diff_h);  % Distancia circular
+            
+            % Diferencias para S y V (normales)
+            diff_s = pixeles(:,2) - centroides(c,2);
+            diff_v = pixeles(:,3) - centroides(c,3);
+            
+            % Distancia euclidiana
+            distancias(:,c) = sqrt(diff_h.^2 + diff_s.^2 + diff_v.^2);
+        end
+        
+        % Asignar etiquetas
+        [~, nuevas_etiquetas] = min(distancias, [], 2);
+        
+        % Verificar convergencia
+        if all(nuevas_etiquetas == etiquetas_anteriores)
+            break;
+        end
+        etiquetas_anteriores = nuevas_etiquetas;
+        
+        % Actualizar centroides
+        for c = 1:k
+            idx_cluster = (nuevas_etiquetas == c);
+            if sum(idx_cluster) > 0
+                % Promedio simple para todos los canales
+                centroides(c, :) = mean(pixeles(idx_cluster, :), 1);
+            end
+        end
+    end
+    
+    % Reconstruir imagen segmentada
+    pixeles_segmentados = zeros(size(pixeles));
+    for c = 1:k
+        idx_cluster = (nuevas_etiquetas == c);
+        if sum(idx_cluster) > 0
+            pixeles_segmentados(idx_cluster, :) = repmat(centroides(c, :), sum(idx_cluster), 1);
+        end
+    end
+    
+    % Reconstruir imagen
+    imagen_hsv_segmentada = reshape(pixeles_segmentados, filas, columnas, 3);
+    
+    % Convertir de HSV a RGB
+    imagen_segmentada = hsv2rgb(imagen_hsv_segmentada);
+    imagen_segmentada = uint8(imagen_segmentada * 255);
+end
